@@ -1,20 +1,27 @@
 import numpy as np
 import pandas as pd
-from scipy.signal import hilbert, butter, filtfilt, savgol_filter
+from scipy.signal import hilbert, butter, filtfilt, welch, savgol_filter
+from sklearn.svm import SVC
+from sklearn.model_selection import cross_val_score
+from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
 # Load EEG data from two separate CSV files
-df1 = pd.read_csv('recording7.csv')  # Contains data for AF7
-df2 = pd.read_csv('recording8.csv')  # Contains data for AF8
+df1 = pd.read_csv('recording11.csv')  # Dataset 1
+df2 = pd.read_csv('recording12.csv')  # Dataset 2
 
-# Assume both files contain 'AF7' and 'AF8' signals in their respective columns
-eeg_signal_1 = df1['AF7'].values
-eeg_signal_2 = df2['AF8'].values
+# Assume both files contain 'AF7' and 'AF8' signals
+eeg_signal_AF7_1 = df1['AF7'].values
+eeg_signal_AF7_2 = df2['AF7'].values
+eeg_signal_AF8_1 = df1['AF8'].values
+eeg_signal_AF8_2 = df2['AF8'].values
 
-# Ensure both signals have the same length
-min_length = min(len(eeg_signal_1), len(eeg_signal_2))
-eeg_signal_1 = eeg_signal_1[:min_length]  # Truncate signal 1
-eeg_signal_2 = eeg_signal_2[:min_length]  # Truncate signal 2
+# Ensure all signals have the same length
+min_length = min(len(eeg_signal_AF7_1), len(eeg_signal_AF7_2), len(eeg_signal_AF8_1), len(eeg_signal_AF8_2))
+eeg_signal_AF7_1 = eeg_signal_AF7_1[:min_length]
+eeg_signal_AF7_2 = eeg_signal_AF7_2[:min_length]
+eeg_signal_AF8_1 = eeg_signal_AF8_1[:min_length]
+eeg_signal_AF8_2 = eeg_signal_AF8_2[:min_length]
 
 # Sampling rate (Hz)
 sampling_rate = 1000  # Example: 1000 samples per second
@@ -27,56 +34,86 @@ def bandpass_filter(data, lowcut, highcut, fs, order=5):
     b, a = butter(order, [low, high], btype='band')
     return filtfilt(b, a, data)
 
-# Apply bandpass filter to both EEG signals (8-13 Hz for alpha waves)
-filtered_signal_1 = bandpass_filter(eeg_signal_1, 8, 13, sampling_rate)
-filtered_signal_2 = bandpass_filter(eeg_signal_2, 8, 13, sampling_rate)
+# Compute PLI for a pair of signals over multiple epochs
+def compute_epoch_based_pli(signal_1, signal_2, epoch_length, fs):
+    epoch_samples = int(epoch_length * fs)
+    num_epochs = len(signal_1) // epoch_samples
+    pli_values = []
 
-# Apply Savitzky-Golay filter for smoothing and de-noising
-smoothed_signal_1 = savgol_filter(filtered_signal_1, window_length=51, polyorder=3)
-smoothed_signal_2 = savgol_filter(filtered_signal_2, window_length=51, polyorder=3)
+    for epoch_idx in range(num_epochs):
+        start = epoch_idx * epoch_samples
+        end = start + epoch_samples
+        print(f"Processing epoch {epoch_idx + 1}/{num_epochs}...")
 
-# Compute the analytic signal using Hilbert transform (to get the phase)
-analytic_signal_1 = hilbert(smoothed_signal_1)
-analytic_signal_2 = hilbert(smoothed_signal_2)
+        # Extract epoch
+        epoch_signal_1 = signal_1[start:end]
+        epoch_signal_2 = signal_2[start:end]
 
-# Extract the instantaneous phases
-phase_1 = np.angle(analytic_signal_1)
-phase_2 = np.angle(analytic_signal_2)
+        # Apply bandpass filter
+        filtered_signal_1 = bandpass_filter(epoch_signal_1, 8, 13, fs)
+        filtered_signal_2 = bandpass_filter(epoch_signal_2, 8, 13, fs)
 
-# Compute the phase difference
-phase_diff = phase_1 - phase_2
+        # Compute the analytic signal
+        analytic_signal_1 = hilbert(filtered_signal_1)
+        analytic_signal_2 = hilbert(filtered_signal_2)
 
-# Compute the Phase Lag Index (PLI)
-PLI = np.abs(np.mean(np.sign(phase_diff)))
+        # Extract the instantaneous phases
+        phase_1 = np.angle(analytic_signal_1)
+        phase_2 = np.angle(analytic_signal_2)
 
-# Print the PLI value
-print(f"Phase Lag Index (PLI) between the two signals: {PLI:.4f}")
+        # Compute phase difference and PLI
+        phase_diff = phase_1 - phase_2
+        pli = np.abs(np.mean(np.sign(phase_diff)))
+        pli_values.append(pli)
 
-# Plot the smoothed signals and their phase difference
-plt.figure(figsize=(12, 6))
+    print("PLI computation complete.")
+    return np.mean(pli_values)
 
-# Plot the smoothed EEG signals
-plt.subplot(3, 1, 1)
-plt.plot(df1['time'][:min_length], smoothed_signal_1, label='EEG Channel 1 (AF7)', color='b')
-plt.plot(df2['time'][:min_length], smoothed_signal_2, label='EEG Channel 2 (AF8)', color='r')
-plt.title('Smoothed EEG Signals (Alpha Band: 8-13 Hz)')
-plt.xlabel('Time (s)')
-plt.ylabel('Amplitude')
+# Compute Welch PSD
+def compute_psd(signal, fs, nperseg=1000):
+    freqs, psd = welch(signal, fs=fs, nperseg=nperseg, window='hann')  # Use 'hann' instead of 'hanning'
+    return freqs, psd
+
+# Compute PLI and PSD for AF7
+pli_AF7 = compute_epoch_based_pli(eeg_signal_AF7_1, eeg_signal_AF7_2, epoch_length=2, fs=sampling_rate)
+freqs_AF7, psd_AF7_1 = compute_psd(eeg_signal_AF7_1, sampling_rate)
+freqs_AF7, psd_AF7_2 = compute_psd(eeg_signal_AF7_2, sampling_rate)
+
+# Compute PLI and PSD for AF8
+pli_AF8 = compute_epoch_based_pli(eeg_signal_AF8_1, eeg_signal_AF8_2, epoch_length=2, fs=sampling_rate)
+freqs_AF8, psd_AF8_1 = compute_psd(eeg_signal_AF8_1, sampling_rate)
+freqs_AF8, psd_AF8_2 = compute_psd(eeg_signal_AF8_2, sampling_rate)
+
+# Print results
+print(f"Average PLI for AF7: {pli_AF7:.4f}")
+print(f"Average PLI for AF8: {pli_AF8:.4f}")
+
+# Plot PSD
+plt.figure(figsize=(10, 6))
+plt.subplot(2, 1, 1)
+plt.semilogy(freqs_AF7, psd_AF7_1, label='AF7 - Dataset 1')
+plt.semilogy(freqs_AF7, psd_AF7_2, label='AF7 - Dataset 2')
+plt.title('Power Spectral Density (AF7)')
+plt.xlabel('Frequency (Hz)')
+plt.ylabel('Power/Frequency (dB/Hz)')
 plt.legend()
 
-# Plot the phase difference
-plt.subplot(3, 1, 2)
-plt.plot(df1['time'][:min_length], phase_diff, label='Phase Difference (AF7 - AF8)', color='g')
-plt.title('Phase Difference between EEG Channels')
-plt.xlabel('Time (s)')
-plt.ylabel('Phase Difference (radians)')
-
-# Plot the sign of the phase difference (used for PLI)
-plt.subplot(3, 1, 3)
-plt.plot(df1['time'][:min_length], np.sign(phase_diff), label='Sign of Phase Difference', color='m')
-plt.title('Sign of Phase Difference')
-plt.xlabel('Time (s)')
-plt.ylabel('Sign')
+plt.subplot(2, 1, 2)
+plt.semilogy(freqs_AF8, psd_AF8_1, label='AF8 - Dataset 1')
+plt.semilogy(freqs_AF8, psd_AF8_2, label='AF8 - Dataset 2')
+plt.title('Power Spectral Density (AF8)')
+plt.xlabel('Frequency (Hz)')
+plt.ylabel('Power/Frequency (dB/Hz)')
+plt.legend()
 
 plt.tight_layout()
 plt.show()
+
+# SVM Classification (Commented Out)
+# features = np.array([[pli_AF7, pli_AF8]])
+# labels = np.array([...])  # Add labels (e.g., 0 for friends, 1 for couples)
+# scaler = StandardScaler()
+# features = scaler.fit_transform(features)
+# svm = SVC(kernel='linear', C=1.0)
+# scores = cross_val_score(svm, features, labels, cv=5)
+# print(f"Classification Accuracy: {np.mean(scores) * 100:.2f}%")
