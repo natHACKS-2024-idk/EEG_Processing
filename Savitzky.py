@@ -1,9 +1,6 @@
 import numpy as np
 import pandas as pd
 from scipy.signal import hilbert, butter, filtfilt, welch, savgol_filter
-from sklearn.svm import SVC
-from sklearn.model_selection import cross_val_score
-from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
 # Load EEG data from two separate CSV files
@@ -34,6 +31,10 @@ def bandpass_filter(data, lowcut, highcut, fs, order=5):
     b, a = butter(order, [low, high], btype='band')
     return filtfilt(b, a, data)
 
+# Apply Savitzky-Golay filter for denoising
+def apply_savitzky_filter(data, window_length, polyorder):
+    return savgol_filter(data, window_length, polyorder)
+
 # Compute PLI for a pair of signals over multiple epochs
 def compute_epoch_based_pli(signal_1, signal_2, epoch_length, fs):
     epoch_samples = int(epoch_length * fs)
@@ -53,9 +54,13 @@ def compute_epoch_based_pli(signal_1, signal_2, epoch_length, fs):
         filtered_signal_1 = bandpass_filter(epoch_signal_1, 8, 13, fs)
         filtered_signal_2 = bandpass_filter(epoch_signal_2, 8, 13, fs)
 
+        # Apply Savitzky-Golay filter for further smoothing
+        smoothed_signal_1 = apply_savitzky_filter(filtered_signal_1, window_length=51, polyorder=3)
+        smoothed_signal_2 = apply_savitzky_filter(filtered_signal_2, window_length=51, polyorder=3)
+
         # Compute the analytic signal
-        analytic_signal_1 = hilbert(filtered_signal_1)
-        analytic_signal_2 = hilbert(filtered_signal_2)
+        analytic_signal_1 = hilbert(smoothed_signal_1)
+        analytic_signal_2 = hilbert(smoothed_signal_2)
 
         # Extract the instantaneous phases
         phase_1 = np.angle(analytic_signal_1)
@@ -71,7 +76,7 @@ def compute_epoch_based_pli(signal_1, signal_2, epoch_length, fs):
 
 # Compute Welch PSD
 def compute_psd(signal, fs, nperseg=1000):
-    freqs, psd = welch(signal, fs=fs, nperseg=nperseg, window='hann')  # Use 'hann' instead of 'hanning'
+    freqs, psd = welch(signal, fs=fs, nperseg=nperseg, window='hann')  # Use 'hann' window
     return freqs, psd
 
 # Compute PLI and PSD for AF7
@@ -108,12 +113,3 @@ plt.legend()
 
 plt.tight_layout()
 plt.show()
-
-# SVM Classification (Commented Out)
-# features = np.array([[pli_AF7, pli_AF8]])
-# labels = np.array([...])  # Add labels (e.g., 0 for friends, 1 for couples)
-# scaler = StandardScaler()
-# features = scaler.fit_transform(features)
-# svm = SVC(kernel='linear', C=1.0)
-# scores = cross_val_score(svm, features, labels, cv=5)
-# print(f"Classification Accuracy: {np.mean(scores) * 100:.2f}%")
