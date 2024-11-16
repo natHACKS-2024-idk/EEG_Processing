@@ -31,13 +31,9 @@ def bandpass_filter(data, lowcut, highcut, fs, order=5):
 filtered_signal_1 = bandpass_filter(eeg_signal_1, 8, 13, sampling_rate)
 filtered_signal_2 = bandpass_filter(eeg_signal_2, 8, 13, sampling_rate)
 
-# Apply Savitzky-Golay filter for smoothing and de-noising
-smoothed_signal_1 = savgol_filter(filtered_signal_1, window_length=51, polyorder=3)
-smoothed_signal_2 = savgol_filter(filtered_signal_2, window_length=51, polyorder=3)
-
 # Compute the analytic signal using Hilbert transform (to get the phase)
-analytic_signal_1 = hilbert(smoothed_signal_1)
-analytic_signal_2 = hilbert(smoothed_signal_2)
+analytic_signal_1 = hilbert(filtered_signal_1)
+analytic_signal_2 = hilbert(filtered_signal_2)
 
 # Extract the instantaneous phases
 phase_1 = np.angle(analytic_signal_1)
@@ -57,8 +53,8 @@ plt.figure(figsize=(12, 6))
 
 # Plot the smoothed EEG signals
 plt.subplot(3, 1, 1)
-plt.plot(df1['time'][:min_length], smoothed_signal_1, label='EEG Channel 1 (AF7)', color='b')
-plt.plot(df2['time'][:min_length], smoothed_signal_2, label='EEG Channel 2 (AF8)', color='r')
+plt.plot(df1['time'][:min_length], filtered_signal_1, label='EEG Channel 1 (AF7)', color='b')
+plt.plot(df2['time'][:min_length], filtered_signal_2, label='EEG Channel 2 (AF8)', color='r')
 plt.title('Smoothed EEG Signals (Alpha Band: 8-13 Hz)')
 plt.xlabel('Time (s)')
 plt.ylabel('Amplitude')
